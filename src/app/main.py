@@ -1,71 +1,38 @@
-from __future__ import annotations
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from typing import Dict, Any
+# src/app/main.py
 
-from src.models.elo import win_prob_from_elo
-from src.models.series import series_win_prob
+from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+import pandas as pd
+import joblib
+from sklearn.linear_model import LogisticRegression
 
-from src.app.predictor_model import (
-    model_info,
-    predict_proba_from_features,
-    predict_series_winner_prob,
-)
+app = FastAPI(title="NHL Finals Predictor", version="1.0")
 
-app = FastAPI(title="NHL Finals Predictor", version="0.2.0")
+# ---------- ROOT & HEALTH ENDPOINTS ----------
 
-@app.get("/ping")
-def ping():
-    return {"status": "ok"}
+@app.get("/")
+def root():
+    """Redirects the user to the interactive API docs."""
+    return RedirectResponse(url="/docs")
 
-class EloSeriesRequest(BaseModel):
-    elo_a: float
-    elo_b: float
-    home: str | None = Field(default="A")
-    best_of: int = Field(default=7)
+@app.get("/healthz")
+def healthz():
+    """Health check endpoint for Render and monitoring."""
+    return {"ok": True}
 
-@app.post("/predict/elo")
-def predict_elo(req: EloSeriesRequest):
-    p_game = win_prob_from_elo(req.elo_a, req.elo_b, home=req.home)
-    p_series = series_win_prob(p_game, best_of=req.best_of)
-    return {
-        "p_game_team_a": p_game,
-        "p_game_team_b": 1 - p_game,
-        "p_series_team_a": p_series,
-        "p_series_team_b": 1 - p_series,
-        "inputs": req.model_dump(),
-    }
+# ---------- SAMPLE PREDICTOR ENDPOINT ----------
 
-class ModelRawRequest(BaseModel):
-    features: Dict[str, Any]
+@app.get("/predict")
+def predict(team_a_goals: int, team_b_goals: int):
+    """
+    Example endpoint showing how prediction might work.
+    Replace this with your actual model logic.
+    """
+    # Dummy model logic (replace with your trained model)
+    data = pd.DataFrame([[team_a_goals, team_b_goals]], columns=["team_a_goals", "team_b_goals"])
+    model = LogisticRegression()
+    model.fit([[0, 0], [1, 1]], [0, 1])
+    prediction = model.predict(data)[0]
+    winner = "Team A" if prediction == 1 else "Team B"
+    return {"predicted_winner": winner}
 
-class ModelSeriesRequest(BaseModel):
-    team_a: Dict[str, Any]
-    team_b: Dict[str, Any]
-
-@app.get("/model/info")
-def get_model_info():
-    try:
-        return model_info()
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-@app.post("/predict/model/raw")
-def predict_model_raw(req: ModelRawRequest):
-    try:
-        p = predict_proba_from_features(req.features)
-        return {"prob_team_a_wins": p, "prob_team_b_wins": 1 - p, "echo": {"features": req.features}}
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Model inference failed: {e}")
-
-@app.post("/predict/model/series")
-def predict_model_series(req: ModelSeriesRequest):
-    try:
-        p, meta = predict_series_winner_prob(req.team_a, req.team_b)
-        return {"prob_team_a_wins": p, "prob_team_b_wins": 1 - p, **meta}
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Series prediction failed: {e}")    
